@@ -16,20 +16,12 @@ class Cal():
             print('ImageNotFoundException: image not found')
 
 
-# calProcessID = autoit.run("Calc.exe")
-# # className = "[Class:#" + str(calProcessID) + "]"
-# # print(className)
-# calApp = Cal()
-# calApp.process()
+calProcessID = autoit.run("Calc.exe")
+# className = "[Class:#" + str(calProcessID) + "]"
+# print(className)
+calApp = Cal()
+calApp.process()
 
-
-start = time.time()
-
-time.sleep(0.1)  # or do something more productive
-
-done = time.time()
-elapsed = done - start
-print(elapsed)
     
 
 # class Cat:
