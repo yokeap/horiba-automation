@@ -19,6 +19,10 @@
 //      0x17 Measure lamp deactive
 //      0x20 change to global state 20
 // global state: 20 (takeoff sample)
+//      0x20 open chamber
+//      0x21 chamber lamp active, send command to PLC
+//      0x22 wait PLC signal (SOR, Sample Off Ready)
+//      0x30 success all state
 
 
 #include <Arduino.h>
@@ -31,6 +35,8 @@
 #define SW_OPEN_CHAMBER A9
 #define SW_RESET A6
 // #define SW_STOP A2
+
+#define MESA_DEBUG true
 
 // lamp pin out
 const int LAMP_CHAMBER = 3;  //
@@ -123,7 +129,6 @@ void lin_chamber_lid_stop(){
   analogWrite(LIN_CHAMBER_LID_PWM, 0);
 }
 
-
 unsigned int lin_chamber_lid_stroke_in(){
   // start stroke
   if(!digitalRead(FULLY_OPEN_CHAMBER)){
@@ -205,7 +210,7 @@ unsigned char pushSample(unsigned char state){
       break;
     case 0x04:
       digitalWrite(LAMP_CHAMBER, HIGH);
-      Serial.write("S,PLC,LC\r");                   // LC = LID close;
+      Serial1.write("S,PLC,LO\r");                   // LO = LID close;
       state = 0x10;
       // return 0x10;
       break;
@@ -238,10 +243,14 @@ unsigned char measure(unsigned char state){
     break;
   case 0x13:
      digitalWrite(LAMP_CHAMBER, LOW);
-     Serial.write("S,MESA,MS\r");                   // MS = Measure
+     Serial2.write("S,MESA,MS\r");                   // MS = Measure
      state = 0x14;
     break;
   case 0x14:
+    if(MESA_DEBUG) {
+        state = 0x15;
+        break;
+    }
     if (string2Complete) {
         Serial.println(inputString2);
         if(inputString1 == "R,MESA,MSA") state = 0x15;    //MSA = Measure Ready
@@ -249,12 +258,18 @@ unsigned char measure(unsigned char state){
         inputString2 = "";
         string2Complete = false;
       }
+    // for debugging
+    
     break;
   case 0x15:
     digitalWrite(LAMP_MEASURE, HIGH);
     state = 0x16;
     break;
   case 0x16:
+    if(MESA_DEBUG) {
+        state = 0x17;
+        break;
+    }
     if (string2Complete) {
         Serial.println(inputString2);
         if(inputString1 == "R,MESA,MSD") state = 0x17;    //MSD = Measure Done
@@ -278,10 +293,27 @@ unsigned char measure(unsigned char state){
 unsigned char takeoffSample(unsigned char state){
   switch (state)
   {
-  case /* constant-expression */:
-    /* code */
+  case 0x20:
+    if(lin_chamber_lid_stroke_in()) state = 0x21;
     break;
-  
+  case 0x21:
+    digitalWrite(LAMP_CHAMBER, HIGH);
+    Serial1.write("S,PLC,LO\r");                   // L = LID open;
+    state = 0x22;
+    break;
+  case 0x22:
+    if (string1Complete) {
+      Serial.println(inputString1);
+      if(inputString1 == "R,PLC,SOR") state = 0x23;    //SOR = Sample Off Ready
+      // clear the string:
+      inputString1 = "";
+      string1Complete = false;
+    }
+    break;
+  case 0x23:
+    if(lin_chamber_lid_home()) state = 0x30;
+    break;
+
   default:
     break;
   }
@@ -309,6 +341,8 @@ void setup() {
   inputString1.reserve(200);
   Serial2.begin(9600);
   inputString2.reserve(200);
+
+  // lamp 
   pinMode(LAMP_CHAMBER, OUTPUT);
   pinMode(LAMP_MEASURE, OUTPUT);
   pinMode(LAMP_SAMPLE, OUTPUT);
@@ -317,7 +351,22 @@ void setup() {
   digitalWrite(LAMP_MEASURE, LOW);
   digitalWrite(LAMP_SAMPLE, LOW);
   digitalWrite(LAMP_ALARM, LOW);
+
+  // limit switch
+  pinMode(HOME_ACT_CHAMBER, INPUT);
+  pinMode(PUSH_ACT_CHAMBER, INPUT);
+  pinMode(FULLY_CLOSE_CHAMBER, INPUT);
+  pinMode(FULLY_OPEN_CHAMBER, INPUT);
+
+  // linear motor for activate chamber lid
+  pinMode(LIN_ACT_CHAMBER_PWM, OUTPUT);
+  pinMode(LIN_ACT_CHAMBER_INA, OUTPUT);
+  pinMode(LIN_ACT_CHAMBER_INB, OUTPUT);
   
+  // linear motor for chamber lid
+  pinMode(LIN_CHAMBER_LID_PWM, OUTPUT);
+  pinMode(LIN_CHAMBER_LID_INA, OUTPUT);
+  pinMode(LIN_CHAMBER_LID_INB, OUTPUT);
 }
 
 void loop() {
