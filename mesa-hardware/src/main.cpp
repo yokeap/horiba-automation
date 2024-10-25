@@ -26,17 +26,17 @@
 
 
 #include <Arduino.h>
-#define HOME_ACT_CHAMBER A0
-#define PUSH_ACT_CHAMBER A4
+#define HOME_ACT_CHAMBER A2
+#define PUSH_ACT_CHAMBER A0
 #define FULLY_CLOSE_CHAMBER A1
-#define FULLY_OPEN_CHAMBER A2
+#define FULLY_OPEN_CHAMBER A3
 
 #define SW_AUTO A8
 #define SW_OPEN_CHAMBER A9
-#define SW_RESET A6
+#define SW_RESET A4
 // #define SW_STOP A2
 
-#define MESA_DEBUG true
+#define MESA_DEBUG false
 
 // lamp pin out
 const int LAMP_CHAMBER = 3;  //
@@ -50,10 +50,8 @@ const int LIN_ACT_CHAMBER_INA = 9;
 const int LIN_ACT_CHAMBER_INB = 10;
 
 //linear motor for chamber lid
-const int LIN_CHAMBER_LID_PWM = 11;
-const int LIN_CHAMBER_LID_INA = 12;
-const int LIN_CHAMBER_LID_INB = 13;
-
+const int LIN_CHAMBER_LID_LPWM = 11;
+const int LIN_CHAMBER_LID_RPWM = 12;
 
 unsigned char globalState = 0;
 unsigned char localState = 0;
@@ -66,11 +64,13 @@ unsigned long previousMillis = 0;
 
 bool flagPreviousMillis = false;
 
-String inputString1 = "";         // a String to hold incoming data
+String inputString1;         // a String to hold incoming data
 bool string1Complete = false;  // whether the string is complete
 
-String inputString2 = "";         // a String to hold incoming data
+String inputString2;         // a String to hold incoming data
 bool string2Complete = false;  // whether the string is complete
+
+bool flag_mesa_status = false;
 
 bool delayC(unsigned long delayT){
   if(!flagPreviousMillis) {
@@ -85,82 +85,121 @@ bool delayC(unsigned long delayT){
       return true;
     }
   }
+  return false;
+}
+
+bool plc_receive(String strCheck){
+  if (string1Complete) {
+    Serial.print("PLC: ");
+    Serial.print(inputString1);
+      if(inputString1 == strCheck) {
+        // clear the string:
+        inputString1 = "";
+        string1Complete = false;
+        strCheck = "";
+        return true;
+      }
+      // clear the string:
+      inputString1 = "";
+      string1Complete = false;
+      return false;
+    }
+  return false;
+}
+
+bool mesa_receive(char *strCheck){
+  if (string2Complete) {
+    Serial.print(inputString2);
+    Serial.print("string check: ");
+    Serial.print(strCheck);
+      if(inputString2 == strCheck) {
+        // clear the string:
+        inputString2 = "";
+        string2Complete = false;
+        return true;
+      }
+      // clear the string:
+      inputString2 = "";
+      string2Complete = false;
+      return false;
+    }
+  return false;
 }
 
 void lin_act_chamber_stop(){
-  analogWrite(LIN_ACT_CHAMBER_PWM, 0);
-}
-
-unsigned int lin_act_chamber_stroke_in(){
-  if(!digitalRead(HOME_ACT_CHAMBER)){
-    lin_act_chamber_stop();
-    return 1;
-  }
-  // start stroke
-  digitalWrite(LIN_ACT_CHAMBER_INA, HIGH);
+  digitalWrite(LIN_ACT_CHAMBER_PWM, 0);
+  digitalWrite(LIN_ACT_CHAMBER_INA, LOW);
   digitalWrite(LIN_ACT_CHAMBER_INB, LOW);
-  if(++uintPwmVal_lin_act_chamber < 255){
-    analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
-  } 
-  else
-    uintPwmVal_lin_act_chamber = 255;
-    analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
-  return 0;
+  uintPwmVal_lin_act_chamber = 0;
 }
 
-unsigned int lin_act_chamber_stroke_out(){
-  if(!digitalRead(PUSH_ACT_CHAMBER)){
+unsigned char lin_act_chamber_stroke_in(){
+  if(!digitalRead(HOME_ACT_CHAMBER)){
     lin_act_chamber_stop();
     return 1;
   }
   // start stroke
   digitalWrite(LIN_ACT_CHAMBER_INA, LOW);
   digitalWrite(LIN_ACT_CHAMBER_INB, HIGH);
-  if(++uintPwmVal_lin_act_chamber < 255){
+  if(++uintPwmVal_lin_act_chamber < 120){
     analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
   } 
-  else
-    uintPwmVal_lin_act_chamber = 255;
+  else{
+    uintPwmVal_lin_act_chamber = 120;
     analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
+  }
+  return 0;
+}
+
+unsigned char lin_act_chamber_stroke_out(){
+  if(!digitalRead(PUSH_ACT_CHAMBER)){
+    lin_act_chamber_stop();
+    return 1;
+  }
+  // start stroke
+  digitalWrite(LIN_ACT_CHAMBER_INA, HIGH);
+  digitalWrite(LIN_ACT_CHAMBER_INB, LOW);
+  if(++uintPwmVal_lin_act_chamber < 120){
+    analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
+    Serial.println(uintPwmVal_lin_act_chamber);
+  } 
+  else{
+    uintPwmVal_lin_act_chamber = 120;
+    analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
+  }
   return 0;
 }
 
 void lin_chamber_lid_stop(){
-  analogWrite(LIN_CHAMBER_LID_PWM, 0);
+  analogWrite(LIN_CHAMBER_LID_LPWM, 0);
+  analogWrite(LIN_CHAMBER_LID_RPWM, 0);
+  uintPwmVal_lin_chamber_lid = 0;
 }
 
-unsigned int lin_chamber_lid_stroke_in(){
+unsigned char lin_chamber_lid_stroke_in(){
   // start stroke
   if(!digitalRead(FULLY_OPEN_CHAMBER)){
     lin_chamber_lid_stop();
     return 1;
   }
-  digitalWrite(LIN_CHAMBER_LID_INA, HIGH);
-  digitalWrite(LIN_CHAMBER_LID_INB, LOW);
-  if(++uintPwmVal_lin_chamber_lid < 255){
-    analogWrite(LIN_CHAMBER_LID_PWM, uintPwmVal_lin_chamber_lid);
-  } 
-  else
-    uintPwmVal_lin_act_chamber = 255;
-    analogWrite(LIN_CHAMBER_LID_PWM, uintPwmVal_lin_chamber_lid);
+
+ if(uintPwmVal_lin_chamber_lid < 150) uintPwmVal_lin_chamber_lid = uintPwmVal_lin_chamber_lid + 1;
+
+  analogWrite(LIN_CHAMBER_LID_LPWM, uintPwmVal_lin_chamber_lid);
+  analogWrite(LIN_CHAMBER_LID_RPWM, 0);
   return 0;
 }
 
-unsigned int lin_chamber_lid_stroke_out(){
+unsigned char lin_chamber_lid_stroke_out(){
   if(!digitalRead(FULLY_CLOSE_CHAMBER)){
     lin_chamber_lid_stop();
     return 1;
   }
   // start stroke
-  digitalWrite(LIN_CHAMBER_LID_INA, LOW);
-  digitalWrite(LIN_CHAMBER_LID_INB, HIGH);
-  if(++uintPwmVal_lin_chamber_lid < 255){
-    analogWrite(LIN_CHAMBER_LID_PWM, uintPwmVal_lin_chamber_lid);
-  } 
-  else
-    uintPwmVal_lin_chamber_lid = 255;
-    analogWrite(LIN_CHAMBER_LID_PWM, uintPwmVal_lin_chamber_lid);
-    return 0;
+  if(uintPwmVal_lin_chamber_lid < 150) uintPwmVal_lin_chamber_lid = uintPwmVal_lin_chamber_lid + 1;
+  analogWrite(LIN_CHAMBER_LID_LPWM, 0);
+  analogWrite(LIN_CHAMBER_LID_RPWM, uintPwmVal_lin_chamber_lid);
+  return 0;
 }
 
 unsigned char lin_act_chamber_home(){
@@ -182,35 +221,61 @@ unsigned char lin_chamber_lid_home(){
 }
 
 unsigned char pushSampleHome(unsigned char state){
-  if(lin_act_chamber_home() && lin_chamber_lid_home()) return 0x01;
+  if(lin_act_chamber_home() && lin_chamber_lid_home()) return state + 1;
+  return state;
 }
 
 unsigned char lin_act_chamber_activate(unsigned char state){
-  if(lin_act_chamber_stroke_out()) return 0x02;
+  if(lin_act_chamber_stroke_out()) return state + 1;
+  return state;
 }
 
 unsigned char lin_chamber_lid_pull(unsigned char state){
-  if(lin_act_chamber_stroke_in() && lin_chamber_lid_stroke_in()) return 0x04;
+  // if(lin_act_chamber_stroke_out() && lin_chamber_lid_stroke_in()) return state + 1;
+  if(lin_chamber_lid_stroke_in()) return state + 1;
+  // if( lin_chamber_lid_stroke_in()) return 0x04;
+  return state;
+}
+
+unsigned char lin_chamber_lid_close(unsigned char state){
+  if(lin_act_chamber_stroke_in() && lin_chamber_lid_home()) return state + 1;
+  // if( lin_chamber_lid_stroke_in()) return 0x04;
+  return state;
 }
 
 unsigned char pushSample(unsigned char state){
   switch (state)
   {
     case 0x00:
-      state = pushSampleHome(0x00);
+      Serial.println(state, HEX);
+      Serial1.write("PLC,CHK\n");                   // check PLC
+      state = 0x01;
+      Serial.println(inputString1);
       break;
     case 0x01:
-      state = lin_act_chamber_activate(0x01);
+      // Serial.println(state, HEX);
+      if(plc_receive("PLC,RDY\n")) state++;    //RDY = Ready
       break;
     case 0x02:
-      if(delayC(1000)) state = 0x03;
+      Serial.println(state, HEX);
+      state = pushSampleHome(state);
       break;
     case 0x03:
-      state = lin_chamber_lid_pull(0x03);
+      Serial.println(state, HEX);
+      state = lin_act_chamber_activate(state);
       break;
     case 0x04:
+      Serial.println(state, HEX);
+      if(delayC(1000)) state++;
+      break;
+    case 0x05:
+      Serial.println(state, HEX);
+      state = lin_chamber_lid_pull(state);
+      break;
+    case 0x06:
+      Serial.println(state, HEX);
       digitalWrite(LAMP_CHAMBER, HIGH);
-      Serial1.write("S,PLC,LO\r");                   // LO = LID close;
+      Serial1.write("PLC,LO\n");                   // LO = LID close;
       state = 0x10;
       // return 0x10;
       break;
@@ -226,59 +291,47 @@ unsigned char measure(unsigned char state){
   switch (state)
   {
   case 0x10:
-    if (string1Complete) {
-      Serial.println(inputString1);
-      if(inputString1 == "R,PLC,SR") state = 0x11;    //SR = Sample Ready
-      // clear the string:
-      inputString1 = "";
-      string1Complete = false;
-    }
+    Serial.println(state, HEX);
+    if(plc_receive("PLC,SIR\n")) state++;    //SIR = Sample IN Ready
     break;
   case 0x11:
+    Serial.println(state, HEX);
     digitalWrite(LAMP_SAMPLE, HIGH);
-    state = 0x12;
+    state++;
     break;
   case 0x12:
-    if(lin_chamber_lid_home()) state = 0x13;
+    Serial.println(state, HEX);
+    state = lin_chamber_lid_close(state);
     break;
   case 0x13:
+     Serial.println(state, HEX);
      digitalWrite(LAMP_CHAMBER, LOW);
-     Serial2.write("S,MESA,MS\r");                   // MS = Measure
-     state = 0x14;
+     Serial2.write("MESA,MS\n");                   // MS = Measure
+     state++;
     break;
   case 0x14:
-    if(MESA_DEBUG) {
-        state = 0x15;
-        break;
-    }
-    if (string2Complete) {
-        Serial.println(inputString2);
-        if(inputString1 == "R,MESA,MSA") state = 0x15;    //MSA = Measure Ready
-        // clear the string:
-        inputString2 = "";
-        string2Complete = false;
-      }
-    // for debugging
-    
+    Serial.println(state, HEX);
+    digitalWrite(LAMP_MEASURE, HIGH);
+    state++;
     break;
   case 0x15:
-    digitalWrite(LAMP_MEASURE, HIGH);
-    state = 0x16;
-    break;
-  case 0x16:
+    Serial.println(state, HEX);  
     if(MESA_DEBUG) {
-        state = 0x17;
+        state++;
         break;
     }
-    if (string2Complete) {
-        Serial.println(inputString2);
-        if(inputString1 == "R,MESA,MSD") state = 0x17;    //MSD = Measure Done
-        // clear the string:
-        inputString2 = "";
-        string2Complete = false;
-      }
+    if(mesa_receive("MESA,MSR\n")) state++;    //MSR = Measure Ready
+    break;
+  case 0x16:
+    Serial.println(state, HEX);
+    if(MESA_DEBUG) {
+        state++;
+        break;
+    }
+    if(mesa_receive("MESA,MSD\n")) state++;    //MSD = Measure Done
     break;
   case 0x17:
+    Serial.println(state, HEX);
     digitalWrite(LAMP_MEASURE, LOW);
     state = 0x20;
     break;
@@ -294,24 +347,41 @@ unsigned char takeoffSample(unsigned char state){
   switch (state)
   {
   case 0x20:
-    if(lin_chamber_lid_stroke_in()) state = 0x21;
-    break;
+      Serial.println(state, HEX);
+      state = lin_act_chamber_activate(state);
+      break;
   case 0x21:
-    digitalWrite(LAMP_CHAMBER, HIGH);
-    Serial1.write("S,PLC,LO\r");                   // L = LID open;
-    state = 0x22;
-    break;
+      Serial.println(state, HEX);
+      if(delayC(1000)) state++;
+      break;  
   case 0x22:
-    if (string1Complete) {
-      Serial.println(inputString1);
-      if(inputString1 == "R,PLC,SOR") state = 0x23;    //SOR = Sample Off Ready
-      // clear the string:
-      inputString1 = "";
-      string1Complete = false;
-    }
+    Serial.println(state, HEX);
+    state = lin_chamber_lid_pull(state);
     break;
   case 0x23:
-    if(lin_chamber_lid_home()) state = 0x30;
+    Serial.println(state, HEX);
+    digitalWrite(LAMP_CHAMBER, HIGH);
+    Serial1.write("PLC,LO\n");                   // L = LID open;
+    state++;
+    break;
+  case 0x24:
+    Serial.println(state, HEX);
+    if(plc_receive("PLC,SOR\n")) state++;    //SR = Sample Ready
+    break;
+  case 0x25:
+    Serial.println(state, HEX);
+    digitalWrite(LAMP_SAMPLE, LOW);
+    state++;
+    break;
+  case 0x26:
+    Serial.println(state, HEX);
+    // if(lin_chamber_lid_home()) state++;
+    state = pushSampleHome(state);
+    break;
+  case 0x27:
+    Serial.println(state, HEX);
+     digitalWrite(LAMP_CHAMBER, LOW);
+     state = 0x30;
     break;
 
   default:
@@ -320,27 +390,17 @@ unsigned char takeoffSample(unsigned char state){
   return state;
 }
 
-// void lamp_state_check(){
-//   if(!digitalRead(HOME_ACT_CHAMBER)){
-//     digitalWrite()
-//   }
-//   if(!digitalRead(PUSH_ACT_CHAMBER)){
-
-//   }
-//   if(!digitalRead(FULLY_CLOSE_CHAMBER)){
-
-//   }
-//   if(!digitalRead(FULLY_OPEN_CHAMBER)){
-
-//   }
-// }
-
 void setup() {
+  pinMode(18, OUTPUT);
+  pinMode(19, INPUT_PULLUP);
   Serial.begin(9600);
+  delay(1000);
   Serial1.begin(9600);
-  inputString1.reserve(200);
+  delay(1000);
+  inputString1.reserve(20);
   Serial2.begin(9600);
-  inputString2.reserve(200);
+  delay(1000);
+  inputString2.reserve(20);
 
   // lamp 
   pinMode(LAMP_CHAMBER, OUTPUT);
@@ -364,59 +424,73 @@ void setup() {
   pinMode(LIN_ACT_CHAMBER_INB, OUTPUT);
   
   // linear motor for chamber lid
-  pinMode(LIN_CHAMBER_LID_PWM, OUTPUT);
-  pinMode(LIN_CHAMBER_LID_INA, OUTPUT);
-  pinMode(LIN_CHAMBER_LID_INB, OUTPUT);
+  pinMode(LIN_CHAMBER_LID_LPWM, OUTPUT);
+  pinMode(LIN_CHAMBER_LID_RPWM, OUTPUT);
+
+  delay(1000);
+  Serial.println("Ready");
 }
 
 void loop() {
-  
-  switch (globalState)
-  {
-  case 0x00:
-    localState = pushSample(localState);
-    globalState = localState & 0xF0;
-    break;
-  case 0x10:
-    localState = measure(0x10);
-    globalState = localState & 0xF0;
-    break;
-  case 0x20:
-    localState = takeoffSample(0x20);
-    globalState = localState & 0xF0;
-    break;
-  case 0x30:
-    localState = 0;
-    break;
+  if(!flag_mesa_status){
+    if(mesa_receive("MESA,CHK\n")){
+      Serial2.write("MESA,RDY\n");
+      flag_mesa_status = true;
+    }
+  }
 
-  default:
-    break;
+  //  flag_mesa_status = true;
+  if(flag_mesa_status){
+    switch (globalState)
+    {
+    case 0x00:
+      localState = pushSample(localState);
+      globalState = localState & 0xF0;
+      break;
+    case 0x10:
+      localState = measure(localState);
+      globalState = localState & 0xF0;
+      break;
+    case 0x20:
+      localState = takeoffSample(localState);
+      globalState = localState & 0xF0;
+      break;
+    case 0x30:
+      localState = 0;
+      globalState = 0;
+      break;
+
+    default:
+      break;
+    }
   }
 }
 
-void serial1Event() {
-  while (Serial.available()) {
+void serialEvent1() {
+  while (Serial1.available()) {
     // get the new byte:
-    char inChar = (char)Serial1.read();
+    char inChar1 = (char)Serial1.read();
+    // Serial.print(inChar1);
     // add it to the inputString:
-    inputString1 += inChar;
+    inputString1 += inChar1;
     // if the incoming character is a newline, set a flag so the main loop can
     // do something about it:
-    if (inChar == '\r') {
+    // Serial.print(inputString1);
+    if (inChar1 == '\n') {
       string1Complete = true;
     }
   }
 }
 
-void serial2Event() {
-  while (Serial.available()) {
+void serialEvent2() {
+  while (Serial2.available()) {
     // get the new byte:
-    char inChar = (char)Serial2.read();
+    char inChar2 = (char)Serial2.read();
     // add it to the inputString:
-    inputString2 += inChar;
+    inputString2 += inChar2;
     // if the incoming character is a newline, set a flag so the main loop can
     // do something about it:
-    if (inChar == '\r') {
+    if (inChar2 == '\n') {
       string2Complete = true;
     }
   }
