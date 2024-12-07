@@ -3,9 +3,9 @@ import pyautogui
 import threading
 from datetime import datetime
 # from . import serial_port
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QThread
-from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
-from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget, QMainWindow
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QThread
+from PyQt6.QtSerialPort import QSerialPort, QSerialPortInfo
+from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget, QMainWindow
 
 try:
     import Queue
@@ -25,16 +25,16 @@ class serial_port(QObject):
         if self.serial_port.isOpen():
             self.serial_port.close()
         self.serial_port.setPortName(port_name)
-        # self.serial_port.setBaudRate(9600)
-        # self.serial_port.setDataBits(QSerialPort.DataBits.Data8)
-        # self.serial_port.setParity(QSerialPort.Parity.NoParity)
-        # self.serial_port.setStopBits(QSerialPort.StopBits.OneStop)
-        # self.serial_port.open(QSerialPort.OpenModeFlag.ReadWrite)
-        self.serial_port.setBaudRate(QSerialPort.Baud9600)
-        self.serial_port.setDataBits(QSerialPort.Data8)
-        self.serial_port.setParity(QSerialPort.NoParity)
-        self.serial_port.setStopBits(QSerialPort.OneStop)
-        self.serial_port.open(QSerialPort.ReadWrite)
+        self.serial_port.setBaudRate(9600)
+        self.serial_port.setDataBits(QSerialPort.DataBits.Data8)
+        self.serial_port.setParity(QSerialPort.Parity.NoParity)
+        self.serial_port.setStopBits(QSerialPort.StopBits.OneStop)
+        self.serial_port.open(QSerialPort.OpenModeFlag.ReadWrite)
+        # self.serial_port.setBaudRate(QSerialPort.Baud9600)
+        # self.serial_port.setDataBits(QSerialPort.Data8)
+        # self.serial_port.setParity(QSerialPort.NoParity)
+        # self.serial_port.setStopBits(QSerialPort.OneStop)
+        # self.serial_port.open(QSerialPort.ReadWrite)
 
     @pyqtSlot(str)
     def write_data(self, data):
@@ -63,7 +63,7 @@ class mesa(QThread):
         self.data_send.connect(self.serial_port.write_data)
         self.running = True
         self.serialReceive = 0
-        self.init = False
+        self.bootStatus = False
 
         # self.stop_event = threading.Event()
         n=0
@@ -103,16 +103,33 @@ class mesa(QThread):
     #         data = self.serial_port.readLine().data().decode().strip()
     #         self.data_received.emit(data)
 
+    def resource_path(relative_path):
+        """ Get absolute path to resource, works for dev and for PyInstaller """
+        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(base_path, relative_path)
+
     def boot(self):
         # bootup process
         # self.data_send.emit("MESA,CHK\n")
-        self.data_send.emit("MESA,CHK\n")
-        time.sleep(10) 
+        time.sleep(10)
+
+        ################ skip calibration window ################### 
+        try:
+            # pyautogui.locateOnScreen('./imgdata/bt_cal_energy.png')
+            # pyautogui.press('esc')
+            pyautogui.click('./imgdata/bt_cal_energy_copy.png')
+        except pyautogui.ImageNotFoundException:
+            print('Error: Did not found calibration window')
+            # self.data_send.emit("MESA,ALM\n")
+            
+        
+        ################ skip cancle of whatever ###################
+        time.sleep(1)
         try:
             pyautogui.click('./imgdata/_0_btCancel.png')
         except pyautogui.ImageNotFoundException:
             print('Error: Start program')
-            self.data_send.emit("MESA,ALM\n")
+            # self.data_send.emit("MESA,ALM\n")
             return False
 
         ################ project open process ###################
@@ -123,8 +140,9 @@ class mesa(QThread):
             pyautogui.click('./imgdata/_1_ltProjectOpen.png', clicks=2)
         except pyautogui.ImageNotFoundException:
             print('Error: project open')
-            self.data_send.emit("MESA,ALM\n")
+            # self.data_send.emit("MESA,ALM\n")
             return False
+        self.data_send.emit("MESA,CHK\n")
         return True
         
     def process(self):
@@ -218,7 +236,7 @@ class mesa(QThread):
         #             return False
         #         self.data_send.emit("MESA,MSD\n")
         while self.running:
-            if self.serialReceive == "MESA,MS":
+            if self.serialReceive == "MESA,MSS":
                     self.serialReceive = ""
                     # self.data_send.emit("MESA,MSR\n")
                     self.data_send.emit("MESA,MSR\n")
@@ -227,7 +245,8 @@ class mesa(QThread):
                             print("Thread stop!") 
                             return False
                     self.data_send.emit("MESA,MSD\n")
-
+            else :
+                self.serialReceive = ""
 
     # def start_thread(self):        
     #     self.mesaThread.start()

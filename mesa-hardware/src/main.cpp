@@ -31,12 +31,13 @@
 #define FULLY_CLOSE_CHAMBER A1
 #define FULLY_OPEN_CHAMBER A3
 
-#define SW_AUTO A8
+#define SW_MODE A8            // High = Auto mode, Low = Manual mode
 #define SW_OPEN_CHAMBER A9
 #define SW_RESET A4
 // #define SW_STOP A2
 
 #define MESA_DEBUG false
+#define DEBUG true
 
 // lamp pin out
 const int LAMP_CHAMBER = 3;  //
@@ -55,6 +56,7 @@ const int LIN_CHAMBER_LID_RPWM = 12;
 
 unsigned char globalState = 0;
 unsigned char localState = 0;
+unsigned char manualState = 0;
 
 unsigned char uintPwmVal_lin_act_chamber = 0;
 unsigned char uintPwmVal_lin_chamber_lid = 0;
@@ -247,35 +249,34 @@ unsigned char pushSample(unsigned char state){
   switch (state)
   {
     case 0x00:
-      Serial.println(state, HEX);
+
       Serial1.write("PLC,CHK\n");                   // check PLC
       state = 0x01;
       Serial.println(inputString1);
       break;
     case 0x01:
-      // Serial.println(state, HEX);
+      
       if(plc_receive("PLC,RDY\n")) state++;    //RDY = Ready
       break;
     case 0x02:
-      Serial.println(state, HEX);
+
       state = pushSampleHome(state);
       break;
     case 0x03:
-      Serial.println(state, HEX);
       state = lin_act_chamber_activate(state);
       break;
     case 0x04:
-      Serial.println(state, HEX);
+
       if(delayC(1000)) state++;
       break;
     case 0x05:
-      Serial.println(state, HEX);
+
       state = lin_chamber_lid_pull(state);
       break;
     case 0x06:
-      Serial.println(state, HEX);
+
       digitalWrite(LAMP_CHAMBER, HIGH);
-      Serial1.write("PLC,LO\n");                   // LO = LID close;
+      Serial1.write("PLC,LO1\n");                   // LO = LID close;
       state = 0x10;
       // return 0x10;
       break;
@@ -291,31 +292,26 @@ unsigned char measure(unsigned char state){
   switch (state)
   {
   case 0x10:
-    Serial.println(state, HEX);
     if(plc_receive("PLC,SIR\n")) state++;    //SIR = Sample IN Ready
     break;
   case 0x11:
-    Serial.println(state, HEX);
     digitalWrite(LAMP_SAMPLE, HIGH);
     state++;
     break;
   case 0x12:
-    Serial.println(state, HEX);
     state = lin_chamber_lid_close(state);
     break;
   case 0x13:
-     Serial.println(state, HEX);
+
      digitalWrite(LAMP_CHAMBER, LOW);
-     Serial2.write("MESA,MS\n");                   // MS = Measure
+     Serial2.write("MESA,MSS\n");                   // MS = Measure Start
      state++;
     break;
   case 0x14:
-    Serial.println(state, HEX);
     digitalWrite(LAMP_MEASURE, HIGH);
     state++;
     break;
-  case 0x15:
-    Serial.println(state, HEX);  
+  case 0x15:  
     if(MESA_DEBUG) {
         state++;
         break;
@@ -323,7 +319,6 @@ unsigned char measure(unsigned char state){
     if(mesa_receive("MESA,MSR\n")) state++;    //MSR = Measure Ready
     break;
   case 0x16:
-    Serial.println(state, HEX);
     if(MESA_DEBUG) {
         state++;
         break;
@@ -331,11 +326,9 @@ unsigned char measure(unsigned char state){
     if(mesa_receive("MESA,MSD\n")) state++;    //MSD = Measure Done
     break;
   case 0x17:
-    Serial.println(state, HEX);
     digitalWrite(LAMP_MEASURE, LOW);
     state = 0x20;
     break;
-
   
   default:
     break;
@@ -347,39 +340,31 @@ unsigned char takeoffSample(unsigned char state){
   switch (state)
   {
   case 0x20:
-      Serial.println(state, HEX);
       state = lin_act_chamber_activate(state);
       break;
   case 0x21:
-      Serial.println(state, HEX);
       if(delayC(1000)) state++;
       break;  
   case 0x22:
-    Serial.println(state, HEX);
     state = lin_chamber_lid_pull(state);
     break;
   case 0x23:
-    Serial.println(state, HEX);
     digitalWrite(LAMP_CHAMBER, HIGH);
-    Serial1.write("PLC,LO\n");                   // L = LID open;
+    Serial1.write("PLC,LO2\n");                   // L = LID open;
     state++;
     break;
   case 0x24:
-    Serial.println(state, HEX);
     if(plc_receive("PLC,SOR\n")) state++;    //SR = Sample Ready
     break;
   case 0x25:
-    Serial.println(state, HEX);
     digitalWrite(LAMP_SAMPLE, LOW);
     state++;
     break;
   case 0x26:
-    Serial.println(state, HEX);
     // if(lin_chamber_lid_home()) state++;
     state = pushSampleHome(state);
     break;
   case 0x27:
-    Serial.println(state, HEX);
      digitalWrite(LAMP_CHAMBER, LOW);
      state = 0x30;
     break;
@@ -401,6 +386,9 @@ void setup() {
   Serial2.begin(9600);
   delay(1000);
   inputString2.reserve(20);
+
+  pinMode(SW_MODE, INPUT);
+  pinMode(SW_OPEN_CHAMBER, INPUT);
 
   // lamp 
   pinMode(LAMP_CHAMBER, OUTPUT);
@@ -431,13 +419,14 @@ void setup() {
   Serial.println("Ready");
 }
 
-void loop() {
+unsigned char auto_mode(){
+
   if(!flag_mesa_status){
-    if(mesa_receive("MESA,CHK\n")){
-      Serial2.write("MESA,RDY\n");
-      flag_mesa_status = true;
-    }
+  if(mesa_receive("MESA,CHK\n")){
+    Serial2.write("MESA,RDY\n");
+    flag_mesa_status = true;
   }
+}
 
   //  flag_mesa_status = true;
   if(flag_mesa_status){
@@ -463,7 +452,45 @@ void loop() {
     default:
       break;
     }
+    return 0;
   }
+}
+
+unsigned char manual_mode(){
+  globalState = 0;
+  localState = 0;
+  
+  if(!digitalRead(SW_OPEN_CHAMBER)){
+    switch (manualState)
+    {
+    case 0x00:
+      manualState = lin_act_chamber_activate(manualState);
+      break;
+    case 0x01:
+      manualState = lin_chamber_lid_pull(manualState);
+      break;
+
+    default:
+      break;
+    }
+    
+    digitalWrite(LAMP_CHAMBER, HIGH);
+  }
+  else{
+    manualState = 0;
+    pushSampleHome(0);
+    digitalWrite(LAMP_CHAMBER, LOW);
+  }
+  return 0;
+}
+
+void loop() {
+
+//for arduino debug
+if(DEBUG) Serial.println(localState, HEX);
+
+  if(!digitalRead(SW_MODE)) auto_mode();
+  else manual_mode();
 }
 
 void serialEvent1() {
