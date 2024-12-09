@@ -27,32 +27,38 @@
 
 #include <Arduino.h>
 #define HOME_ACT_CHAMBER A2
-#define PUSH_ACT_CHAMBER A0
-#define FULLY_CLOSE_CHAMBER A1
+#define PUSH_ACT_CHAMBER A1
+#define FULLY_CLOSE_CHAMBER A0
 #define FULLY_OPEN_CHAMBER A3
+#define SAMPLE_READY 37
+#define CHECK_OBJ_SENSOR 23
 
-#define SW_MODE A8            // High = Auto mode, Low = Manual mode
-#define SW_OPEN_CHAMBER A9
-#define SW_RESET A4
+#define SW_MODE 24            // High = Auto mode, Low = Manual mode
+#define SW_OPEN_CHAMBER 25
+//#define SW_RESET A4
 // #define SW_STOP A2
 
 #define MESA_DEBUG false
 #define DEBUG true
 
 // lamp pin out
-const int LAMP_CHAMBER = 3;  //
-const int LAMP_MEASURE = 4;  // Open-Close Door
-const int LAMP_SAMPLE = 5;   //
-const int LAMP_ALARM = 6;    // 
+const int LAMP_MODE = 26;    // 
+const int LAMP_CHAMBER = 5;  //
+const int LAMP_SAMPLE = 3;   //
+const int LAMP_MEASURE = 4;  // 
+const int LAMP_ALARM = 2;    // 
 
 // linear motor for activate chamber lid
-const int LIN_ACT_CHAMBER_PWM = 8;
-const int LIN_ACT_CHAMBER_INA = 9;
-const int LIN_ACT_CHAMBER_INB = 10;
+const int LIN_ACT_CHAMBER_LPWM = 11;
+const int LIN_ACT_CHAMBER_RPWM = 12;
 
-//linear motor for chamber lid
-const int LIN_CHAMBER_LID_LPWM = 11;
-const int LIN_CHAMBER_LID_RPWM = 12;
+//linear motor for chamber lid L
+const int LIN_CHAMBER_LID_LPWM_L = 9;
+const int LIN_CHAMBER_LID_RPWM_L = 8;
+
+//linear motor for chamber lid R
+const int LIN_CHAMBER_LID_LPWM_R = 7;
+const int LIN_CHAMBER_LID_RPWM_R = 6;
 
 unsigned char globalState = 0;
 unsigned char localState = 0;
@@ -73,6 +79,17 @@ String inputString2;         // a String to hold incoming data
 bool string2Complete = false;  // whether the string is complete
 
 bool flag_mesa_status = false;
+bool flag_alarm = false;
+
+
+void alarm(){
+  Serial.print("ALARM\n");
+  Serial1.print("PLC,ALM\n");
+  flag_mesa_status = false;
+  lin_act_chamber_stop();
+  lin_chamber_lid_stop();
+  flag_alarm = true;
+}
 
 bool delayC(unsigned long delayT){
   if(!flagPreviousMillis) {
@@ -92,8 +109,8 @@ bool delayC(unsigned long delayT){
 
 bool plc_receive(String strCheck){
   if (string1Complete) {
-    Serial.print("PLC: ");
-    Serial.print(inputString1);
+    // Serial.print("PLC: ");
+    // Serial.print(inputString1);
       if(inputString1 == strCheck) {
         // clear the string:
         inputString1 = "";
@@ -111,9 +128,9 @@ bool plc_receive(String strCheck){
 
 bool mesa_receive(char *strCheck){
   if (string2Complete) {
-    Serial.print(inputString2);
-    Serial.print("string check: ");
-    Serial.print(strCheck);
+    // Serial.print(inputString2);
+    // Serial.print("string check: ");
+    // Serial.print(strCheck);
       if(inputString2 == strCheck) {
         // clear the string:
         inputString2 = "";
@@ -129,9 +146,8 @@ bool mesa_receive(char *strCheck){
 }
 
 void lin_act_chamber_stop(){
-  digitalWrite(LIN_ACT_CHAMBER_PWM, 0);
-  digitalWrite(LIN_ACT_CHAMBER_INA, LOW);
-  digitalWrite(LIN_ACT_CHAMBER_INB, LOW);
+  digitalWrite(LIN_ACT_CHAMBER_LPWM, LOW);
+  digitalWrite(LIN_ACT_CHAMBER_RPWM, LOW);
   uintPwmVal_lin_act_chamber = 0;
 }
 
@@ -141,14 +157,14 @@ unsigned char lin_act_chamber_stroke_in(){
     return 1;
   }
   // start stroke
-  digitalWrite(LIN_ACT_CHAMBER_INA, LOW);
-  digitalWrite(LIN_ACT_CHAMBER_INB, HIGH);
+  digitalWrite(LIN_ACT_CHAMBER_LPWM, LOW);
+  digitalWrite(LIN_ACT_CHAMBER_RPWM, HIGH);
   if(++uintPwmVal_lin_act_chamber < 120){
-    analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
+    analogWrite(LIN_ACT_CHAMBER_RPWM, uintPwmVal_lin_act_chamber);
   } 
   else{
     uintPwmVal_lin_act_chamber = 120;
-    analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
+    analogWrite(LIN_ACT_CHAMBER_RPWM, uintPwmVal_lin_act_chamber);
   }
   return 0;
 }
@@ -159,22 +175,24 @@ unsigned char lin_act_chamber_stroke_out(){
     return 1;
   }
   // start stroke
-  digitalWrite(LIN_ACT_CHAMBER_INA, HIGH);
-  digitalWrite(LIN_ACT_CHAMBER_INB, LOW);
+  digitalWrite(LIN_ACT_CHAMBER_LPWM, HIGH);
+  digitalWrite(LIN_ACT_CHAMBER_RPWM, LOW);
   if(++uintPwmVal_lin_act_chamber < 120){
-    analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
+    analogWrite(LIN_ACT_CHAMBER_LPWM, uintPwmVal_lin_act_chamber);
     Serial.println(uintPwmVal_lin_act_chamber);
   } 
   else{
     uintPwmVal_lin_act_chamber = 120;
-    analogWrite(LIN_ACT_CHAMBER_PWM, uintPwmVal_lin_act_chamber);
+    analogWrite(LIN_ACT_CHAMBER_LPWM, uintPwmVal_lin_act_chamber);
   }
   return 0;
 }
 
 void lin_chamber_lid_stop(){
-  analogWrite(LIN_CHAMBER_LID_LPWM, 0);
-  analogWrite(LIN_CHAMBER_LID_RPWM, 0);
+  analogWrite(LIN_CHAMBER_LID_LPWM_L, 0);
+  analogWrite(LIN_CHAMBER_LID_RPWM_L, 0);
+  analogWrite(LIN_CHAMBER_LID_LPWM_R, 0);
+  analogWrite(LIN_CHAMBER_LID_RPWM_R, 0);
   uintPwmVal_lin_chamber_lid = 0;
 }
 
@@ -187,8 +205,10 @@ unsigned char lin_chamber_lid_stroke_in(){
 
  if(uintPwmVal_lin_chamber_lid < 150) uintPwmVal_lin_chamber_lid = uintPwmVal_lin_chamber_lid + 1;
 
-  analogWrite(LIN_CHAMBER_LID_LPWM, uintPwmVal_lin_chamber_lid);
-  analogWrite(LIN_CHAMBER_LID_RPWM, 0);
+  analogWrite(LIN_CHAMBER_LID_LPWM_L, uintPwmVal_lin_chamber_lid);
+  analogWrite(LIN_CHAMBER_LID_RPWM_L, 0);
+  analogWrite(LIN_CHAMBER_LID_LPWM_R, uintPwmVal_lin_chamber_lid + 10);
+  analogWrite(LIN_CHAMBER_LID_RPWM_R, 0);
   return 0;
 }
 
@@ -199,8 +219,10 @@ unsigned char lin_chamber_lid_stroke_out(){
   }
   // start stroke
   if(uintPwmVal_lin_chamber_lid < 150) uintPwmVal_lin_chamber_lid = uintPwmVal_lin_chamber_lid + 1;
-  analogWrite(LIN_CHAMBER_LID_LPWM, 0);
-  analogWrite(LIN_CHAMBER_LID_RPWM, uintPwmVal_lin_chamber_lid);
+  analogWrite(LIN_CHAMBER_LID_LPWM_L, 0);
+  analogWrite(LIN_CHAMBER_LID_RPWM_L, uintPwmVal_lin_chamber_lid);
+  analogWrite(LIN_CHAMBER_LID_LPWM_R, 0);
+  analogWrite(LIN_CHAMBER_LID_RPWM_R, uintPwmVal_lin_chamber_lid + 10);
   return 0;
 }
 
@@ -275,7 +297,7 @@ unsigned char pushSample(unsigned char state){
       break;
     case 0x06:
 
-      digitalWrite(LAMP_CHAMBER, HIGH);
+      digitalWrite(LAMP_CHAMBER, LOW);
       Serial1.write("PLC,LO1\n");                   // LO = LID close;
       state = 0x10;
       // return 0x10;
@@ -292,23 +314,30 @@ unsigned char measure(unsigned char state){
   switch (state)
   {
   case 0x10:
-    if(plc_receive("PLC,SIR\n")) state++;    //SIR = Sample IN Ready
+    if(plc_receive("PLC,SIR\n"))state++;    //SIR = Sample IN Ready
     break;
   case 0x11:
-    digitalWrite(LAMP_SAMPLE, HIGH);
-    state++;
+    if(!digitalRead(CHECK_OBJ_SENSOR)){
+      digitalWrite(LAMP_SAMPLE, LOW);
+      state++;
+      break;
+    }
+    if(digitalRead(SAMPLE_READY)){
+      digitalWrite(LAMP_SAMPLE, LOW);
+      state++;
+      break;
+    } 
     break;
   case 0x12:
     state = lin_chamber_lid_close(state);
     break;
   case 0x13:
-
-     digitalWrite(LAMP_CHAMBER, LOW);
+     digitalWrite(LAMP_CHAMBER, HIGH);
      Serial2.write("MESA,MSS\n");                   // MS = Measure Start
      state++;
     break;
   case 0x14:
-    digitalWrite(LAMP_MEASURE, HIGH);
+    digitalWrite(LAMP_MEASURE, LOW);
     state++;
     break;
   case 0x15:  
@@ -326,7 +355,7 @@ unsigned char measure(unsigned char state){
     if(mesa_receive("MESA,MSD\n")) state++;    //MSD = Measure Done
     break;
   case 0x17:
-    digitalWrite(LAMP_MEASURE, LOW);
+    digitalWrite(LAMP_MEASURE, HIGH);
     state = 0x20;
     break;
   
@@ -357,15 +386,22 @@ unsigned char takeoffSample(unsigned char state){
     if(plc_receive("PLC,SOR\n")) state++;    //SR = Sample Ready
     break;
   case 0x25:
-    digitalWrite(LAMP_SAMPLE, LOW);
-    state++;
+       if(!digitalRead(SAMPLE_READY)){
+      digitalWrite(LAMP_SAMPLE, HIGH);
+      state++;
+      break;
+    }
+    else{
+      alarm();
+    }
     break;
   case 0x26:
     // if(lin_chamber_lid_home()) state++;
+    
     state = pushSampleHome(state);
     break;
   case 0x27:
-     digitalWrite(LAMP_CHAMBER, LOW);
+     digitalWrite(LAMP_CHAMBER, HIGH);
      state = 0x30;
     break;
 
@@ -387,43 +423,53 @@ void setup() {
   delay(1000);
   inputString2.reserve(20);
 
-  pinMode(SW_MODE, INPUT);
-  pinMode(SW_OPEN_CHAMBER, INPUT);
+
 
   // lamp 
   pinMode(LAMP_CHAMBER, OUTPUT);
   pinMode(LAMP_MEASURE, OUTPUT);
   pinMode(LAMP_SAMPLE, OUTPUT);
   pinMode(LAMP_ALARM, OUTPUT);
-  digitalWrite(LAMP_CHAMBER, LOW);
-  digitalWrite(LAMP_MEASURE, LOW);
-  digitalWrite(LAMP_SAMPLE, LOW);
-  digitalWrite(LAMP_ALARM, LOW);
-
+  pinMode(LAMP_MODE, OUTPUT);
+  digitalWrite(LAMP_CHAMBER, HIGH); // Low to open lamp
+  digitalWrite(LAMP_MEASURE, HIGH);
+  digitalWrite(LAMP_SAMPLE, HIGH);
+  digitalWrite(LAMP_ALARM, HIGH);
+  digitalWrite(LAMP_MODE, HIGH);
   // limit switch
   pinMode(HOME_ACT_CHAMBER, INPUT);
   pinMode(PUSH_ACT_CHAMBER, INPUT);
   pinMode(FULLY_CLOSE_CHAMBER, INPUT);
   pinMode(FULLY_OPEN_CHAMBER, INPUT);
-
+  pinMode(SAMPLE_READY, INPUT);
+  pinMode(CHECK_OBJ_SENSOR, INPUT);
+  pinMode(SW_MODE, INPUT);
+  pinMode(SW_OPEN_CHAMBER, INPUT);
   // linear motor for activate chamber lid
-  pinMode(LIN_ACT_CHAMBER_PWM, OUTPUT);
-  pinMode(LIN_ACT_CHAMBER_INA, OUTPUT);
-  pinMode(LIN_ACT_CHAMBER_INB, OUTPUT);
+  pinMode(LIN_ACT_CHAMBER_LPWM, OUTPUT);
+  pinMode(LIN_ACT_CHAMBER_RPWM, OUTPUT);
   
-  // linear motor for chamber lid
-  pinMode(LIN_CHAMBER_LID_LPWM, OUTPUT);
-  pinMode(LIN_CHAMBER_LID_RPWM, OUTPUT);
+  // linear motor for chamber lid L
+  pinMode(LIN_CHAMBER_LID_LPWM_L, OUTPUT);
+  pinMode(LIN_CHAMBER_LID_RPWM_L, OUTPUT);
+
+  // linear motor for chamber lid R
+  pinMode(LIN_CHAMBER_LID_LPWM_R, OUTPUT);
+  pinMode(LIN_CHAMBER_LID_RPWM_R, OUTPUT);
+
 
   delay(1000);
   Serial.println("Ready");
 }
 
 unsigned char auto_mode(){
-
+  digitalWrite(LAMP_MODE, LOW);
+  if(DEBUG) Serial.println(localState, HEX);
+  
   if(!flag_mesa_status){
   if(mesa_receive("MESA,CHK\n")){
     Serial2.write("MESA,RDY\n");
+    Serial.println("Ready");
     flag_mesa_status = true;
   }
 }
@@ -459,7 +505,9 @@ unsigned char auto_mode(){
 unsigned char manual_mode(){
   globalState = 0;
   localState = 0;
-  
+
+  Serial.println("Manual_Mode");
+  digitalWrite(LAMP_MODE, HIGH);
   if(!digitalRead(SW_OPEN_CHAMBER)){
     switch (manualState)
     {
@@ -474,12 +522,12 @@ unsigned char manual_mode(){
       break;
     }
     
-    digitalWrite(LAMP_CHAMBER, HIGH);
+    digitalWrite(LAMP_CHAMBER, LOW);
   }
   else{
     manualState = 0;
     pushSampleHome(0);
-    digitalWrite(LAMP_CHAMBER, LOW);
+    digitalWrite(LAMP_CHAMBER, HIGH);
   }
   return 0;
 }
@@ -487,10 +535,22 @@ unsigned char manual_mode(){
 void loop() {
 
 //for arduino debug
-if(DEBUG) Serial.println(localState, HEX);
+  if(flag_alarm){
+    digitalWrite(LAMP_ALARM, LOW);
+    delay(500);
+    digitalWrite(LAMP_ALARM, HIGH);
+    delay(500);
+  }
+  else{
+    if(!digitalRead(SW_MODE)) auto_mode();
+     else manual_mode();
+  }
+  
 
-  if(!digitalRead(SW_MODE)) auto_mode();
-  else manual_mode();
+  // if(mesa_receive("MESA,ALM")) {
+  //   flag_mesa_status = false;
+  //   digitalWrite(LAMP_ALARM, HIGH);
+  // }
 }
 
 void serialEvent1() {
@@ -516,9 +576,14 @@ void serialEvent2() {
     // add it to the inputString:
     inputString2 += inChar2;
     // if the incoming character is a newline, set a flag so the main loop can
-    // do something about it:
+    // do something about it:*-*-*
     if (inChar2 == '\n') {
-      string2Complete = true;
+        string2Complete = true;
+        if (inputString2 == "MESA,ALM\n"){
+          alarm();
+            inputString2 = "";
+            string2Complete = false;
+        }
     }
   }
 }
