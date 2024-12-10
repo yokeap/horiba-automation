@@ -81,15 +81,7 @@ bool string2Complete = false;  // whether the string is complete
 bool flag_mesa_status = false;
 bool flag_alarm = false;
 
-
-void alarm(){
-  Serial.print("ALARM\n");
-  Serial1.print("PLC,ALM\n");
-  flag_mesa_status = false;
-  lin_act_chamber_stop();
-  lin_chamber_lid_stop();
-  flag_alarm = true;
-}
+void alarm();
 
 bool delayC(unsigned long delayT){
   if(!flagPreviousMillis) {
@@ -327,6 +319,9 @@ unsigned char measure(unsigned char state){
       state++;
       break;
     } 
+       else{
+      alarm();
+    }
     break;
   case 0x12:
     state = lin_chamber_lid_close(state);
@@ -386,7 +381,7 @@ unsigned char takeoffSample(unsigned char state){
     if(plc_receive("PLC,SOR\n")) state++;    //SR = Sample Ready
     break;
   case 0x25:
-       if(!digitalRead(SAMPLE_READY)){
+      if(!digitalRead(SAMPLE_READY)){
       digitalWrite(LAMP_SAMPLE, HIGH);
       state++;
       break;
@@ -409,6 +404,15 @@ unsigned char takeoffSample(unsigned char state){
     break;
   }
   return state;
+}
+
+void alarm(){
+  Serial.print("ALARM\n");
+  Serial1.print("PLC,ALM\n");
+  flag_mesa_status = false;
+  lin_act_chamber_stop();
+  lin_chamber_lid_stop();
+  flag_alarm = true;
 }
 
 void setup() {
@@ -472,7 +476,7 @@ unsigned char auto_mode(){
     Serial.println("Ready");
     flag_mesa_status = true;
   }
-}
+ }
 
   //  flag_mesa_status = true;
   if(flag_mesa_status){
@@ -581,8 +585,8 @@ void serialEvent2() {
         string2Complete = true;
         if (inputString2 == "MESA,ALM\n"){
           alarm();
-            inputString2 = "";
-            string2Complete = false;
+          inputString2 = "";
+          string2Complete = false;
         }
     }
   }
