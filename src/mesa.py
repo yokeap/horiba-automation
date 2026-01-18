@@ -180,7 +180,7 @@ class mesa(QThread):
                         return True
                 
                 elapsed = time.time() - start_time
-                self.log(f"Waiting for image: {image_path} ({elapsed:.1f}/{timeout}s, "INFO")", "INFO")
+                self.log(f"Waiting for image: {image_path} ({elapsed:.1f}/{timeout}s, INFO)", "INFO")
                 time.sleep(check_interval)
                 
             except pyautogui.ImageNotFoundException:
