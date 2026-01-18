@@ -7,15 +7,17 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QThread
 from PyQt6.QtSerialPort import QSerialPort, QSerialPortInfo
 from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget, QMainWindow
 
+# FIXED: Separate try blocks for Queue and cv2
 try:
     import Queue
+except ImportError:
+    import queue as Queue
+
+try:
     import cv2
     OPENCV_AVAILABLE = True
 except ImportError:
-    import queue as Queue
     OPENCV_AVAILABLE = False
-    print("Warning: OpenCV (cv2) not installed. Image detection will use basic matching without confidence levels.")
-    print("To install: pip install opencv-python")
     
 import sys, time, serial
 
@@ -39,7 +41,6 @@ class serial_port(QObject):
 
     @pyqtSlot(str)
     def write_data(self, data):
-        print(data)
         if self.serial_port.isOpen():
             self.serial_port.writeData(data.encode())
 
@@ -54,6 +55,7 @@ class mesa(QThread):
     error_occurred = pyqtSignal(str, str)  # Signal for error messages (title, message)
     process_completed = pyqtSignal(str)  # Signal for success messages
     status_update = pyqtSignal(str)  # Signal for status updates
+    log_message = pyqtSignal(str, str)  # NEW: Signal for detailed logging (message, level)
     
     def __init__(self, comport):
         QThread.__init__(self)
@@ -62,7 +64,7 @@ class mesa(QThread):
         self.serial_port.data_received.connect(self.on_data_received)
         self.data_send.connect(self.serial_port.write_data)
         self.running = True
-        self.serialReceive = 0
+        self.serialReceive = ""  # FIXED: Changed from 0 to "" (string)
         self.bootStatus = False
         self.init = True
         
@@ -73,398 +75,428 @@ class mesa(QThread):
         self.do_egat_50kv = False
         
         # Configure pyautogui settings for better reliability
-        pyautogui.PAUSE = 0.5  # Add 0.5s pause between pyautogui actions
-        pyautogui.FAILSAFE = True  # Move mouse to corner to abort
+        pyautogui.PAUSE = 0.5
+        pyautogui.FAILSAFE = True
 
     def resource_path(self, relative_path):
         """ Get absolute path to resource, works for dev and for PyInstaller """
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(base_path, relative_path)
+    
+    def log(self, message, level="INFO"):
+        """Helper method to emit log messages to GUI"""
+        print(message)  # Still print to console for debugging
+        self.log_message.emit(message, level)
 
-    def find_and_click(self, image_path, confidence=0.8, retries=3, timeout=5, click_count=1):
-        """
-        Improved image detection and clicking with multiple strategies
+    def find_and_click(self, image_path, confidence=0.8, retries=3, timeout=10, click_count=1):
+        """Improved image detection and clicking with comprehensive logging"""
+        # Use resource_path for PyInstaller
+        if not os.path.isabs(image_path):
+            image_path = self.resource_path(image_path)
         
-        Args:
-            image_path: Path to the image file
-            confidence: Confidence level for image matching (0.0 to 1.0)
-            retries: Number of retry attempts
-            timeout: Maximum time to wait for image (seconds)
-            click_count: Number of clicks (1 for single, 2 for double)
+        image_name = os.path.basename(image_path)
+        self.log(f"Searching for image: {image_name}", "INFO")
         
-        Returns:
-            True if successful, False otherwise
-        """
         start_time = time.time()
         attempt = 0
         
         while attempt < retries and (time.time() - start_time) < timeout:
             try:
-                # Try different confidence levels
-                confidence_levels = [confidence, confidence - 0.1, confidence - 0.2]
-                
-                for conf in confidence_levels:
-                    if conf < 0.5:
-                        continue
+                if OPENCV_AVAILABLE:
+                    # Try different confidence levels with OpenCV
+                    confidence_levels = [confidence, max(0.5, confidence - 0.1), max(0.5, confidence - 0.2)]
                     
-                    # Try to locate the image
-                    location = pyautogui.locateOnScreen(image_path, confidence=conf)
+                    for conf in confidence_levels:
+                        location = pyautogui.locateOnScreen(image_path, confidence=conf, grayscale=True)
+                        
+                        if location:
+                            center = pyautogui.center(location)
+                            self.log(f"✓ Found {image_name} at ({center.x}, {center.y}) with confidence {conf:.2f}", "SUCCESS")
+                            
+                            # Click on the center
+                            pyautogui.click(center.x, center.y, clicks=click_count)
+                            click_type = "double-clicked" if click_count == 2 else "clicked"
+                            self.log(f"✓ {click_type.capitalize()} {image_name}", "SUCCESS")
+                            time.sleep(0.5)
+                            return True
+                else:
+                    # Fallback: basic matching without confidence
+                    location = pyautogui.locateOnScreen(image_path)
                     
                     if location:
-                        # Get center coordinates
                         center = pyautogui.center(location)
-                        print(f"Found image: {image_path} at {center} with confidence {conf}")
+                        self.log(f"✓ Found {image_name} at ({center.x}, {center.y})", "SUCCESS")
                         
-                        # Click on the center
                         pyautogui.click(center.x, center.y, clicks=click_count)
+                        click_type = "double-clicked" if click_count == 2 else "clicked"
+                        self.log(f"✓ {click_type.capitalize()} {image_name}", "SUCCESS")
                         time.sleep(0.5)
                         return True
                 
-                # If not found, wait a bit and retry
-                print(f"Attempt {attempt + 1}/{retries}: Image not found: {image_path}")
+                # If not found, wait and retry
+                self.log(f"Attempt {attempt + 1}/{retries}: Image not found, retrying...", "WARNING")
                 time.sleep(1)
                 attempt += 1
                 
             except pyautogui.ImageNotFoundException:
-                print(f"Attempt {attempt + 1}/{retries}: Image not found exception: {image_path}")
+                self.log(f"Attempt {attempt + 1}/{retries}: Image not detected", "WARNING")
                 time.sleep(1)
                 attempt += 1
             except Exception as e:
-                error_msg = f"Error in find_and_click: {e}"
-                print(error_msg)
-                # self.error_occurred.emit("Detection Error", error_msg)
+                error_msg = f"Error during image detection: {str(e)}"
+                self.log(error_msg, "ERROR")
+                self.error_occurred.emit("Detection Error", error_msg)
                 time.sleep(1)
                 attempt += 1
         
-        error_msg = f"Failed to find image after {retries} attempts: {os.path.basename(image_path)}"
-        print(error_msg)
-        # self.error_occurred.emit("Image Not Found", error_msg)
+        error_msg = f"✗ Failed to find {image_name} after {retries} attempts"
+        self.log(error_msg, "ERROR")
+        self.error_occurred.emit("Image Not Found", error_msg)
         return False
 
     def wait_for_image(self, image_path, confidence=0.8, timeout=300, check_interval=5):
-        """
-        Wait for an image to appear on screen
+        """Wait for an image to appear with detailed logging"""
+        if not os.path.isabs(image_path):
+            image_path = self.resource_path(image_path)
         
-        Args:
-            image_path: Path to the image file
-            confidence: Confidence level for image matching
-            timeout: Maximum time to wait (seconds)
-            check_interval: Time between checks (seconds)
+        image_name = os.path.basename(image_path)
+        self.log(f"Waiting for completion indicator: {image_name}", "INFO")
+        self.log(f"Timeout: {timeout}s, checking every {check_interval}s", "INFO")
         
-        Returns:
-            True if image found, False if timeout
-        """
         start_time = time.time()
+        last_log_time = start_time
         
         while (time.time() - start_time) < timeout:
             try:
-                # Try different confidence levels
-                confidence_levels = [confidence, confidence - 0.1, confidence - 0.2]
-                
-                for conf in confidence_levels:
-                    if conf < 0.5:
-                        continue
+                if OPENCV_AVAILABLE:
+                    confidence_levels = [confidence, max(0.5, confidence - 0.1), max(0.5, confidence - 0.2)]
                     
-                    location = pyautogui.locateOnScreen(image_path, confidence=conf)
+                    for conf in confidence_levels:
+                        location = pyautogui.locateOnScreen(image_path, confidence=conf, grayscale=True)
+                        if location:
+                            elapsed = time.time() - start_time
+                            self.log(f"✓ Process completed! Ready signal detected after {elapsed:.1f}s", "SUCCESS")
+                            return True
+                else:
+                    location = pyautogui.locateOnScreen(image_path)
                     if location:
-                        print(f"Image appeared: {image_path} with confidence {conf}")
+                        elapsed = time.time() - start_time
+                        self.log(f"✓ Process completed! Ready signal detected after {elapsed:.1f}s", "SUCCESS")
                         return True
                 
+                # Log progress every 15 seconds
                 elapsed = time.time() - start_time
-                print(f"Waiting for image: {image_path} ({elapsed:.1f}/{timeout}s)")
+                if elapsed - last_log_time >= 15:
+                    self.log(f"Still waiting... ({int(elapsed)}s / {timeout}s elapsed)", "INFO")
+                    last_log_time = elapsed
+                
                 time.sleep(check_interval)
                 
             except pyautogui.ImageNotFoundException:
                 time.sleep(check_interval)
             except Exception as e:
-                print(f"Error waiting for image: {e}")
+                self.log(f"Error while waiting: {str(e)}", "ERROR")
                 time.sleep(check_interval)
         
-        print(f"Timeout waiting for image: {image_path}")
+        self.log(f"✗ Timeout: Process did not complete within {timeout}s", "ERROR")
         return False
 
     def boot(self):
-        """Bootup process with improved image detection"""
-        print("Starting boot process...")
+        """Bootup process with detailed logging"""
+        self.log("=" * 50, "INFO")
+        self.log("STARTING BOOT SEQUENCE", "INFO")
+        self.log("=" * 50, "INFO")
+        
+        self.status_update.emit("Status: Boot - Initializing...")
+        self.log("Waiting 10 seconds for MESA application to start...", "INFO")
         time.sleep(10)
 
         ################ skip calibration window ################### 
-        print("Looking for calibration window...")
-        if not self.find_and_click('./imgdata/bt_cal_energy_copy.png', confidence=0.7, retries=3):
-            print('Warning: Calibration window not found, continuing...')
-            # Don't return False here, as it might not always appear
+        self.log("Step 1: Checking for calibration window...", "INFO")
+        self.status_update.emit("Status: Boot - Checking calibration...")
         
-        ################ skip cancel of whatever ###################
+        if not self.find_and_click('./imgdata/bt_cal_energy_copy.png', confidence=0.7, retries=3):
+            self.log("⚠ Calibration window not found (may be optional), continuing...", "WARNING")
+        
+        ################ skip cancel button ###################
         time.sleep(1)
-        print("Looking for cancel button...")
+        self.log("Step 2: Looking for cancel button...", "INFO")
+        self.status_update.emit("Status: Boot - Finding cancel button...")
+        
         if not self.find_and_click('./imgdata/_0_btCancel.png', confidence=0.8, retries=3):
-            self.error_occurred.emit("Boot Error", "Cannot find cancel button. Please ensure the application is running.")
+            self.error_occurred.emit("Boot Error", "Cannot find cancel button")
+            self.log("✗ Boot failed: Cancel button not found", "ERROR")
             return False
 
         ################ project open process ###################
         time.sleep(1)
-        print("Opening project...")
+        self.log("Step 3: Opening project...", "INFO")
+        self.status_update.emit("Status: Boot - Opening project...")
+        
         try:
+            self.log("Sending Ctrl+O to open project dialog...", "INFO")
             pyautogui.hotkey('ctrl', 'o')
             time.sleep(2)
             
-            if not self.find_and_click('./imgdata/_1_ltProjectOpen.png', confidence=0.95, retries=3, click_count=2):
-                self.error_occurred.emit("Boot Error", "Cannot find project to open. Please check if the project list is visible.")
+            self.log("Looking for project in list...", "INFO")
+            if not self.find_and_click('./imgdata/_1_ltProjectOpen.png', confidence=0.8, retries=3, click_count=2):
+                self.error_occurred.emit("Boot Error", "Cannot find project to open")
+                self.log("✗ Boot failed: Project not found in list", "ERROR")
                 return False
                 
         except Exception as e:
-            error_msg = f'Error in project open: {str(e)}'
-            print(error_msg)
+            error_msg = f'Error opening project: {str(e)}'
+            self.log(error_msg, "ERROR")
             self.error_occurred.emit("Boot Error", error_msg)
             return False
         
+        ################ warmup if selected ###################
         if self.do_warmup:
-            print("\n========== Executing Warmup ==========")
-            self.status_update.emit("Running Warmup...")
+            self.log("=" * 50, "INFO")
+            self.log("EXECUTING WARMUP PROCESS", "INFO")
+            self.log("=" * 50, "INFO")
+            self.status_update.emit("Status: Running Warmup...")
+            
             if not self.warmupProcess():
-                self.error_occurred.emit("Boot Error", "Warmup failed - stopping thread.")
-                self.status_update.emit("Status: Failed")
-                print("Warmup failed - stopping thread")
+                self.error_occurred.emit("Warmup Error", "Warmup process failed")
+                self.log("✗ Warmup failed", "ERROR")
                 return False
             
         self.data_send.emit("MESA,CHK\n")
-        print("Boot process completed successfully")
+        self.log("✓ Boot sequence completed successfully", "SUCCESS")
+        self.log("=" * 50, "INFO")
+        self.status_update.emit("Status: Boot Complete - Ready")
         return True
     
     def warmupProcess(self):
-        """Warmup process implementation with improved detection"""
-        print("Starting Warmup process...")
+        """Warmup process with detailed logging"""
+        self.log("Looking for warmup button...", "INFO")
         time.sleep(2)
         
-        if not self.find_and_click('./imgdata/bt_warmup.png', confidence=0.8, retries=3):
-            self.error_occurred.emit("Warmup Error", "Cannot start warmup process. Button not found.")
+        if not self.find_and_click('./imgdata/bt_warmup.png', confidence=0.8, retries=5):
+            self.error_occurred.emit("Warmup Error", "Warmup button not found")
             self.data_send.emit("MESA,ALM\n")
             return False
         
-         # Wait for process completion with improved detection
-        print("Waiting for warmup process to complete...")
-        if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=1300, check_interval=10):
-            self.error_occurred.emit("Warmup Error", "Process timeout or incomplete. Ready signal not detected.")
-            self.data_send.emit("MESA,ALM\n")
-            return False
+        self.log("Warmup started, waiting 60 seconds...", "INFO")
+        self.status_update.emit("Status: Warmup in progress (60s)...")
         
-        print("Warmup process completed")
-        print("\nWarmup process completed successfully")
+        # Countdown logging
+        for remaining in [45, 30, 15, 5]:
+            time.sleep(15 if remaining == 45 else (15 if remaining > 15 else 10))
+            if remaining > 0:
+                self.log(f"Warmup: {remaining}s remaining...", "INFO")
+        
+        time.sleep(5)  # Final 5 seconds
+        
+        self.log("✓ Warmup process completed", "SUCCESS")
+        self.process_completed.emit("Warmup process completed successfully")
         return True
     
     def egat15kVProcess(self):
-        """EGAT 15kV process implementation with improved detection"""
-        print("Starting EGAT 15kV process...")
+        """EGAT 15kV process with detailed logging"""
+        self.log("=" * 50, "INFO")
+        self.log("STARTING EGAT 15kV PROCESS", "INFO")
+        self.log("=" * 50, "INFO")
+        
+        self.status_update.emit("Status: Running EGAT 15kV...")
         time.sleep(2)
         
-        # Click on EGAT 15kV button
-        if not self.find_and_click('./imgdata/bt_15kv.png', confidence=0.8, retries=3):
-            self.error_occurred.emit("EGAT 15kV Error", "Cannot start EGAT 15kV process. Button not found.")
-            self.data_send.emit("MESA,ALM\n")
-            return False
-            
-        time.sleep(10)
-        
-        # Wait for process completion with improved detection
-        print("Waiting for EGAT 15kV process to complete...")
-        if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=300, check_interval=10):
-            self.error_occurred.emit("EGAT 15kV Error", "Process timeout or incomplete. Ready signal not detected.")
+        self.log("Looking for EGAT 15kV button...", "INFO")
+        if not self.find_and_click('./imgdata/bt_egat_15kv.png', confidence=0.8, retries=5):
+            self.error_occurred.emit("EGAT 15kV Error", "Button not found")
             self.data_send.emit("MESA,ALM\n")
             return False
         
-        # Save report
+        self.log("EGAT 15kV process started, waiting for completion...", "INFO")
+        if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=300, check_interval=5):
+            self.error_occurred.emit("EGAT 15kV Error", "Process timeout")
+            self.data_send.emit("MESA,ALM\n")
+            return False
+        
         if self.saveReport("EGAT-15kV"):
-            print("\nEGAT 15kV process completed successfully")
+            self.log("✓ EGAT 15kV process completed successfully", "SUCCESS")
+            self.log("=" * 50, "INFO")
+            self.process_completed.emit("EGAT 15kV process completed")
             return True
         return False
     
     def egat50kVProcess(self):
-        """EGAT 50kV process implementation with improved detection"""
-        print("Starting EGAT 50kV process...")
+        """EGAT 50kV process with detailed logging"""
+        self.log("=" * 50, "INFO")
+        self.log("STARTING EGAT 50kV PROCESS", "INFO")
+        self.log("=" * 50, "INFO")
+        
+        self.status_update.emit("Status: Running EGAT 50kV...")
         time.sleep(2)
         
-        # Click on EGAT 50kV button
-        if not self.find_and_click('./imgdata/bt_50kv.png', confidence=0.8, retries=3):
-            self.error_occurred.emit("EGAT 50kV Error", "Cannot start EGAT 50kV process. Button not found.")
+        self.log("Looking for EGAT 50kV button...", "INFO")
+        if not self.find_and_click('./imgdata/bt_egat_50kv.png', confidence=0.8, retries=5):
+            self.error_occurred.emit("EGAT 50kV Error", "Button not found")
             self.data_send.emit("MESA,ALM\n")
             return False
         
-        time.sleep(10)
-        
-        # Wait for process completion with improved detection
-        print("Waiting for EGAT 50kV process to complete...")
-        if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=300, check_interval=10):
-            self.error_occurred.emit("EGAT 50kV Error", "Process timeout or incomplete. Ready signal not detected.")
+        self.log("EGAT 50kV process started, waiting for completion...", "INFO")
+        if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=300, check_interval=5):
+            self.error_occurred.emit("EGAT 50kV Error", "Process timeout")
             self.data_send.emit("MESA,ALM\n")
             return False
         
-        # Save report
         if self.saveReport("EGAT-50kV"):
-            print("\nEGAT 50kV process completed successfully")
+            self.log("✓ EGAT 50kV process completed successfully", "SUCCESS")
+            self.log("=" * 50, "INFO")
+            self.process_completed.emit("EGAT 50kV process completed")
             return True
         return False
         
     def egatCalCurveProcess(self):
-        """EGAT Calibration Curve process implementation with improved detection"""
-        print("Starting EGAT Cal Curve process...")
+        """EGAT Cal Curve process with detailed logging"""
+        self.log("=" * 50, "INFO")
+        self.log("STARTING EGAT CALIBRATION CURVE PROCESS", "INFO")
+        self.log("=" * 50, "INFO")
+        
+        self.status_update.emit("Status: Running EGAT Cal Curve...")
         time.sleep(2)
         
-        ################# run egat cal curve ####################
-        if not self.find_and_click('./imgdata/_2_btEGATCal.png', confidence=0.8, retries=3):
-            self.error_occurred.emit("EGAT Cal Curve Error", "Cannot run EGAT Cal Curve. Button not found.")
+        self.log("Looking for EGAT Cal Curve button...", "INFO")
+        if not self.find_and_click('./imgdata/_2_btEGATCal.png', confidence=0.8, retries=5):
+            self.error_occurred.emit("EGAT Cal Curve Error", "Button not found")
             self.data_send.emit("MESA,ALM\n")
             return False
 
-        ################# check success with improved waiting #######################
-        time.sleep(10)
-        print("Waiting for EGAT Cal Curve process to complete...")
+        self.log("EGAT Cal Curve process started, waiting for completion...", "INFO")
         if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=300, check_interval=10):
-            self.error_occurred.emit("EGAT Cal Curve Error", "Process timeout or incomplete. Ready signal not detected.")
+            self.error_occurred.emit("EGAT Cal Curve Error", "Process timeout")
             self.data_send.emit("MESA,ALM\n")
             return False
 
-        # Save report
-        print("Save report...")
         if self.saveReport("EGAT-CAL"):
-            print("\nEGAT Cal Curve process completed successfully")
+            self.log("✓ EGAT Cal Curve process completed successfully", "SUCCESS")
+            self.log("=" * 50, "INFO")
+            self.process_completed.emit("EGAT Cal Curve process completed")
             return True
         return False
     
     def saveReport(self, process_name):
-        """Common report saving function with improved detection"""
-        print(f"Saving report for {process_name}...")
+        """Save report with detailed logging"""
+        self.log(f"Initiating report save for {process_name}...", "INFO")
+        self.status_update.emit(f"Status: Saving {process_name} report...")
         
         ################## report process #######################
         time.sleep(1)
-        if not self.find_and_click('./imgdata/_3_btReport.png', confidence=0.8, retries=3):
-            self.error_occurred.emit("Report Error", f"Cannot open report for {process_name}. Button not found.")
+        self.log("Step 1: Opening report window...", "INFO")
+        if not self.find_and_click('./imgdata/_3_btReport.png', confidence=0.8, retries=5):
+            self.error_occurred.emit("Report Error", "Report button not found")
             self.data_send.emit("MESA,ALM\n")
             return False
 
-        ################## save process #########################
+        ################## export process #########################
         time.sleep(3)
-        try:
-            if not self.find_and_click('./imgdata/_4_btExport.png', confidence=0.8, retries=3):
-                self.error_occurred.emit("Export Error", f"Cannot click export button for {process_name}.")
-                self.data_send.emit("MESA,ALM\n")
-                return False
-            
-            time.sleep(1)
-            
-            if not self.find_and_click('./imgdata/_5_ddExcel.png', confidence=0.8, retries=3):
-                self.error_occurred.emit("Export Error", f"Cannot select Excel format for {process_name}.")
-                self.data_send.emit("MESA,ALM\n")
-                return False
-
-            # Wait for Save As dialog
-            if not autoit.win_wait_active("Save As", 5):
-                self.error_occurred.emit("Save Error", f"Save As dialog did not appear for {process_name}.")
-                self.data_send.emit("MESA,ALM\n")
-                return False
-            
-            time.sleep(1)
-            saveDT = "Report_" + process_name + "_" + datetime.now().strftime("%d-%m-%Y--%H-%M-%S")
-            autoit.control_send("Save As", "Edit1", saveDT)
-            time.sleep(1)
-            autoit.control_click("Save As", "Button2")
-            
-        except pyautogui.ImageNotFoundException as e:
-            error_msg = f'PyAutoGUI error in save process for {process_name}: {str(e)}'
-            print(error_msg)
-            self.error_occurred.emit("Save Error", error_msg)
-            self.data_send.emit("MESA,ALM\n")
-            return False
-        except autoit.autoit.AutoItError as e:
-            error_msg = f'AutoIt error in save process for {process_name}: {str(e)}'
-            print(error_msg)
-            self.error_occurred.emit("Save Error", error_msg)
-            self.data_send.emit("MESA,ALM\n")
-            return False
-        except Exception as e:
-            error_msg = f'Unexpected error in save process for {process_name}: {str(e)}'
-            print(error_msg)
-            self.error_occurred.emit("Save Error", error_msg)
-            self.data_send.emit("MESA,ALM\n")
-            return False
-
-        ##################### close ############################
-        time.sleep(2)
-        if not self.find_and_click('./imgdata/_6_btClose.png', confidence=0.95, retries=3):
-            self.error_occurred.emit("Close Error", f"Cannot close report window for {process_name}.")
+        self.log("Step 2: Clicking export button...", "INFO")
+        if not self.find_and_click('./imgdata/_4_btExport.png', confidence=0.8, retries=5):
+            self.error_occurred.emit("Export Error", "Export button not found")
             self.data_send.emit("MESA,ALM\n")
             return False
         
-        print(f"{process_name} report saved successfully")
+        time.sleep(1)
+        self.log("Step 3: Selecting Excel format...", "INFO")
+        if not self.find_and_click('./imgdata/_5_ddExcel.png', confidence=0.8, retries=5):
+            self.error_occurred.emit("Export Error", "Excel format not found")
+            self.data_send.emit("MESA,ALM\n")
+            return False
+        
+        ################## save dialog #########################
+        self.log("Step 4: Waiting for Save As dialog...", "INFO")
+        if not autoit.win_wait_active("Save As", 10):
+            self.error_occurred.emit("Save Error", "Save As dialog did not appear")
+            self.data_send.emit("MESA,ALM\n")
+            return False
+        
+        time.sleep(1)
+        saveDT = "Report_" + process_name + "_" + datetime.now().strftime("%d-%m-%Y--%H-%M-%S")
+        self.log(f"Step 5: Entering filename: {saveDT}", "INFO")
+        
+        try:
+            autoit.control_send("Save As", "Edit1", saveDT)
+            time.sleep(1)
+            
+            self.log("Step 6: Clicking Save button...", "INFO")
+            autoit.control_click("Save As", "Button2")
+            
+        except Exception as e:
+            error_msg = f'Error saving file: {str(e)}'
+            self.log(error_msg, "ERROR")
+            self.error_occurred.emit("Save Error", error_msg)
+            self.data_send.emit("MESA,ALM\n")
+            return False
+
+        ##################### close report window ############################
+        time.sleep(2)
+        self.log("Step 7: Closing report window...", "INFO")
+        if not self.find_and_click('./imgdata/_6_btClose.png', confidence=0.8, retries=5):
+            self.error_occurred.emit("Close Error", "Close button not found")
+            self.data_send.emit("MESA,ALM\n")
+            return False
+        
+        self.log(f"✓ Report saved successfully: {saveDT}.xlsx", "SUCCESS")
         return True
 
     def run(self):
-        """Main thread execution - runs selected processes in sequence"""
+        """Main thread execution"""
+        self.log("Mesa thread started", "INFO")
+        self.log("Waiting for serial trigger signal (MESA,MSS)...", "INFO")
+        self.status_update.emit("Status: Waiting for trigger...")
+        
         while self.running:
-            self.serialReceive = "MESA,MSS"
             if self.serialReceive == "MESA,MSS":
-                print("Enter Loop")
-                mesa_status = True
+                self.log("✓ Received MESA,MSS trigger signal!", "SUCCESS")
                 self.serialReceive = ""
-
-                # check mesa lid closed status
-                if self.find_and_click('./imgdata/bt_err_door.png', confidence=0.8, retries=3):
-                    all_success = False
-                    mesa_status = False
-                    self.status_update.emit("Status: Failed")
-                    print("MESA lid is open - stopping thread")
-                    self.data_send.emit("MESA,E02\n")
-                    break
-
-                if mesa_status:
-                    self.data_send.emit("MESA,MSR\n")
-                    all_success = True
-
-                # Execute processes based on checkbox selections
+                self.data_send.emit("MESA,MSR\n")
+                
+                all_success = True
+                
+                # Execute processes in order
                 if self.do_egat_cal and all_success:
-                    print("\n========== Executing EGAT Cal Curve ==========")
-                    self.status_update.emit("Running EGAT Cal Curve...")
                     if not self.egatCalCurveProcess():
                         all_success = False
                         self.running = False
-                        self.status_update.emit("Status: Failed")
-                        print("EGAT Cal Curve failed - stopping thread")
+                        self.log("✗ EGAT Cal Curve failed - stopping", "ERROR")
                         break
-
+                
                 if self.do_egat_50kv and all_success:
-                    print("\n========== Executing EGAT 50kV ==========")
-                    self.status_update.emit("Running EGAT 50kV...")
                     if not self.egat50kVProcess():
                         all_success = False
                         self.running = False
-                        self.status_update.emit("Status: Failed")
-                        print("EGAT 50kV failed - stopping thread")
+                        self.log("✗ EGAT 50kV failed - stopping", "ERROR")
                         break
                 
                 if self.do_egat_15kv and all_success:
-                    print("\n========== Executing EGAT 15kV ==========")
-                    self.status_update.emit("Running EGAT 15kV...")
                     if not self.egat15kVProcess():
                         all_success = False
                         self.running = False
-                        self.status_update.emit("Status: Failed")
-                        print("EGAT 15kV failed - stopping thread")
+                        self.log("✗ EGAT 15kV failed - stopping", "ERROR")
                         break
                 
                 if all_success:
                     self.data_send.emit("MESA,MSD\n")
-                    # self.status_update.emit("Status: All Completed Successfully")
-                    print("\n========== All selected processes completed successfully ==========")
-                    self.running = False        # for debugging
+                    self.log("=" * 50, "SUCCESS")
+                    self.log("ALL PROCESSES COMPLETED SUCCESSFULLY!", "SUCCESS")
+                    self.log("=" * 50, "SUCCESS")
+                    self.status_update.emit("Status: All Processes Completed")
+                    self.running = False
                 else:
                     return False
                     
             else:
                 self.serialReceive = ""
-                self.running = False
             
-            time.sleep(0.1)  # Small delay to prevent CPU spinning
+            time.sleep(0.1)
 
     @pyqtSlot(str)
     def on_data_received(self, data):
         self.serialReceive = data
-        print(f"Serial received: {self.serialReceive}")
+        self.log(f"Serial received: {data}", "INFO")
+        self.status_update.emit(f"Serial: {data}")
