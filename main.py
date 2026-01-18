@@ -105,7 +105,9 @@ class MainWindow(QWidget):
         self.statusLabel.setStyleSheet("QLabel { color: orange; font-weight: bold; }")
         
         # Launch the MESA application
+        os.chdir(r"C:\Program Files (x86)\HORIBA\HORIBA X-RAY LAB For MESA-50 SERIES")
         subprocess.Popen("MesaApplication.exe")
+        os.chdir(r"D:\horiba-automation")
         
         # Boot the system
         self.mesaApp.do_warmup = self.checkbox1.isChecked()
@@ -131,6 +133,8 @@ class MainWindow(QWidget):
             # Update status
             self.statusLabel.setText("Status: Ready to Run")
             self.statusLabel.setStyleSheet("QLabel { color: green; font-weight: bold; }")
+
+            self.mesaApp.running = True
             
             # Start the thread
             self.mesaApp.start()

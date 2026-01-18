@@ -132,13 +132,13 @@ class mesa(QThread):
             except Exception as e:
                 error_msg = f"Error in find_and_click: {e}"
                 print(error_msg)
-                self.error_occurred.emit("Detection Error", error_msg)
+                # self.error_occurred.emit("Detection Error", error_msg)
                 time.sleep(1)
                 attempt += 1
         
         error_msg = f"Failed to find image after {retries} attempts: {os.path.basename(image_path)}"
         print(error_msg)
-        self.error_occurred.emit("Image Not Found", error_msg)
+        # self.error_occurred.emit("Image Not Found", error_msg)
         return False
 
     def wait_for_image(self, image_path, confidence=0.8, timeout=300, check_interval=5):
@@ -208,7 +208,7 @@ class mesa(QThread):
             pyautogui.hotkey('ctrl', 'o')
             time.sleep(2)
             
-            if not self.find_and_click('./imgdata/_1_ltProjectOpen.png', confidence=0.8, retries=3, click_count=2):
+            if not self.find_and_click('./imgdata/_1_ltProjectOpen.png', confidence=0.95, retries=3, click_count=2):
                 self.error_occurred.emit("Boot Error", "Cannot find project to open. Please check if the project list is visible.")
                 return False
                 
@@ -223,8 +223,8 @@ class mesa(QThread):
             self.status_update.emit("Running Warmup...")
             if not self.warmupProcess():
                 self.error_occurred.emit("Boot Error", "Warmup failed - stopping thread.")
-                # self.status_update.emit("Status: Failed")
-                # print("Warmup failed - stopping thread")
+                self.status_update.emit("Status: Failed")
+                print("Warmup failed - stopping thread")
                 return False
             
         self.data_send.emit("MESA,CHK\n")
@@ -243,13 +243,13 @@ class mesa(QThread):
         
          # Wait for process completion with improved detection
         print("Waiting for warmup process to complete...")
-        if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=300, check_interval=10):
-            self.error_occurred.emit("EGAT 15kV Error", "Process timeout or incomplete. Ready signal not detected.")
+        if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=1300, check_interval=10):
+            self.error_occurred.emit("Warmup Error", "Process timeout or incomplete. Ready signal not detected.")
             self.data_send.emit("MESA,ALM\n")
             return False
         
         print("Warmup process completed")
-        self.process_completed.emit("Warmup process completed successfully")
+        print("\nWarmup process completed successfully")
         return True
     
     def egat15kVProcess(self):
@@ -262,6 +262,8 @@ class mesa(QThread):
             self.error_occurred.emit("EGAT 15kV Error", "Cannot start EGAT 15kV process. Button not found.")
             self.data_send.emit("MESA,ALM\n")
             return False
+            
+        time.sleep(10)
         
         # Wait for process completion with improved detection
         print("Waiting for EGAT 15kV process to complete...")
@@ -272,7 +274,7 @@ class mesa(QThread):
         
         # Save report
         if self.saveReport("EGAT-15kV"):
-            self.process_completed.emit("EGAT 15kV process completed successfully")
+            print("\nEGAT 15kV process completed successfully")
             return True
         return False
     
@@ -287,6 +289,8 @@ class mesa(QThread):
             self.data_send.emit("MESA,ALM\n")
             return False
         
+        time.sleep(10)
+        
         # Wait for process completion with improved detection
         print("Waiting for EGAT 50kV process to complete...")
         if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=300, check_interval=10):
@@ -296,7 +300,7 @@ class mesa(QThread):
         
         # Save report
         if self.saveReport("EGAT-50kV"):
-            self.process_completed.emit("EGAT 50kV process completed successfully")
+            print("\nEGAT 50kV process completed successfully")
             return True
         return False
         
@@ -312,6 +316,7 @@ class mesa(QThread):
             return False
 
         ################# check success with improved waiting #######################
+        time.sleep(10)
         print("Waiting for EGAT Cal Curve process to complete...")
         if not self.wait_for_image('./imgdata/_2_1_ready.png', confidence=0.8, timeout=300, check_interval=10):
             self.error_occurred.emit("EGAT Cal Curve Error", "Process timeout or incomplete. Ready signal not detected.")
@@ -319,8 +324,9 @@ class mesa(QThread):
             return False
 
         # Save report
+        print("Save report...")
         if self.saveReport("EGAT-CAL"):
-            self.process_completed.emit("EGAT Cal Curve process completed successfully")
+            print("\nEGAT Cal Curve process completed successfully")
             return True
         return False
     
@@ -383,7 +389,7 @@ class mesa(QThread):
 
         ##################### close ############################
         time.sleep(2)
-        if not self.find_and_click('./imgdata/_6_btClose.png', confidence=0.8, retries=3):
+        if not self.find_and_click('./imgdata/_6_btClose.png', confidence=0.95, retries=3):
             self.error_occurred.emit("Close Error", f"Cannot close report window for {process_name}.")
             self.data_send.emit("MESA,ALM\n")
             return False
@@ -394,13 +400,14 @@ class mesa(QThread):
     def run(self):
         """Main thread execution - runs selected processes in sequence"""
         while self.running:
+            self.serialReceive = "MESA,MSS"
             if self.serialReceive == "MESA,MSS":
-
+                print("Enter Loop")
                 mesa_status = True
                 self.serialReceive = ""
 
                 # check mesa lid closed status
-                if not self.find_and_click('./imgdata/bt_err_door.png', confidence=0.8, retries=3):
+                if self.find_and_click('./imgdata/bt_err_door.png', confidence=0.8, retries=3):
                     all_success = False
                     mesa_status = False
                     self.status_update.emit("Status: Failed")
@@ -422,6 +429,16 @@ class mesa(QThread):
                         self.status_update.emit("Status: Failed")
                         print("EGAT Cal Curve failed - stopping thread")
                         break
+
+                if self.do_egat_50kv and all_success:
+                    print("\n========== Executing EGAT 50kV ==========")
+                    self.status_update.emit("Running EGAT 50kV...")
+                    if not self.egat50kVProcess():
+                        all_success = False
+                        self.running = False
+                        self.status_update.emit("Status: Failed")
+                        print("EGAT 50kV failed - stopping thread")
+                        break
                 
                 if self.do_egat_15kv and all_success:
                     print("\n========== Executing EGAT 15kV ==========")
@@ -433,25 +450,17 @@ class mesa(QThread):
                         print("EGAT 15kV failed - stopping thread")
                         break
                 
-                if self.do_egat_50kv and all_success:
-                    print("\n========== Executing EGAT 50kV ==========")
-                    self.status_update.emit("Running EGAT 50kV...")
-                    if not self.egat50kVProcess():
-                        all_success = False
-                        self.running = False
-                        self.status_update.emit("Status: Failed")
-                        print("EGAT 50kV failed - stopping thread")
-                        break
-                
                 if all_success:
                     self.data_send.emit("MESA,MSD\n")
-                    self.status_update.emit("Status: All Completed Successfully")
+                    # self.status_update.emit("Status: All Completed Successfully")
                     print("\n========== All selected processes completed successfully ==========")
+                    self.running = False        # for debugging
                 else:
                     return False
                     
             else:
                 self.serialReceive = ""
+                self.running = False
             
             time.sleep(0.1)  # Small delay to prevent CPU spinning
 
