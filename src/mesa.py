@@ -9,8 +9,14 @@ from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWid
 
 try:
     import Queue
-except:
+    import cv2
+    OPENCV_AVAILABLE = True
+except ImportError:
     import queue as Queue
+    OPENCV_AVAILABLE = False
+    print("Warning: OpenCV (cv2) not installed. Image detection will use basic matching without confidence levels.")
+    print("To install: pip install opencv-python")
+    
 import sys, time, serial
 
 class serial_port(QObject):
