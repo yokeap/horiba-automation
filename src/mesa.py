@@ -415,7 +415,7 @@ class mesa(QThread):
                 self.serialReceive = ""
 
                 # check mesa lid closed status
-                if self.find_and_click('./imgdata/bt_err_door.png', confidence=0.8, retries=1):
+                if self.find_and_click('./imgdata/bt_err_door.png', confidence=0.95, retries=1):
                     all_success = False
                     mesa_status = False
                     self.status_update.emit("Status: Failed")
@@ -424,7 +424,7 @@ class mesa(QThread):
                     break
 
                  # check mesa USB status
-                if self.find_and_click('./imgdata/bt_err_usb.png', confidence=0.8, retries=1):
+                if self.find_and_click('./imgdata/bt_err_usb.png', confidence=0.95, retries=1):
                     all_success = False
                     mesa_status = False
                     self.status_update.emit("Status: Failed")
