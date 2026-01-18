@@ -33,7 +33,8 @@ class MainWindow(QWidget):
         self.mesaApp.error_occurred.connect(self.log_error)
         self.mesaApp.process_completed.connect(self.log_success)
         self.mesaApp.status_update.connect(self.log_status)
-        self.mesaApp.log_message.connect(self.log_message)  # Connect detailed logging from mesa.py
+
+        self.mesaApp.log_message.connect(self.log_message)  # Connect detailed logging
 
     # method for widgets 
     def UiComponents(self, layout): 
@@ -129,11 +130,7 @@ class MainWindow(QWidget):
         self.btClear.clicked.connect(self.clickClear)
         
         # Initial log message
-        if OPENCV_AVAILABLE:
-            self.log_message("System initialized. OpenCV loaded successfully.", "SUCCESS")
-        else:
-            self.log_message("System initialized. WARNING: OpenCV not installed - detection reliability reduced.", "WARNING")
-        self.log_message("Ready to start automation.", "INFO")
+        self.log_message("System initialized. Ready to start.", "INFO")
   
     def log_message(self, message, level="INFO"):
         """Add a message to the log with timestamp and color coding"""
@@ -181,9 +178,7 @@ class MainWindow(QWidget):
         # Update status
         self.statusLabel.setText("Status: Starting...")
         self.statusLabel.setStyleSheet("QLabel { color: orange; font-weight: bold; font-size: 14px; }")
-        self.log_message("=" * 60, "INFO")
-        self.log_message("HORIBA AUTOMATION SYSTEM - STARTING", "INFO")
-        self.log_message("=" * 60, "INFO")
+        self.log_message("Starting Horiba Automation System...", "INFO")
         
         # Launch the MESA application
         try:
@@ -191,9 +186,9 @@ class MainWindow(QWidget):
             os.chdir(r"C:\Program Files (x86)\HORIBA\HORIBA X-RAY LAB For MESA-50 SERIES")
             subprocess.Popen("MesaApplication.exe")
             os.chdir(r"D:\horiba-automation")
-            self.log_message("✓ MESA application launched successfully", "SUCCESS")
+            self.log_message("MESA application launched successfully", "SUCCESS")
         except Exception as e:
-            self.log_message(f"✗ Failed to launch MESA application: {str(e)}", "ERROR")
+            self.log_message(f"Failed to launch MESA application: {str(e)}", "ERROR")
             self.btStart.setEnabled(True)
             return
         
@@ -209,7 +204,7 @@ class MainWindow(QWidget):
             self.mesaApp.do_egat_15kv = self.checkbox4.isChecked()
             
             # Log selected processes
-            self.log_message("Selected processes for execution:", "INFO")
+            self.log_message("Boot successful. Selected processes:", "SUCCESS")
             if self.mesaApp.do_warmup:
                 self.log_message("  ➤ Warmup", "INFO")
             if self.mesaApp.do_egat_cal:
@@ -227,19 +222,18 @@ class MainWindow(QWidget):
             
             # Start the thread
             self.mesaApp.start()
+            self.log_message("Automation started. Waiting for serial trigger (MESA,MSS)...", "INFO")
             
         else: 
             self.mesaApp.data_send.emit("MESA,E01\n")
             self.statusLabel.setText("Status: Boot Failed")
             self.statusLabel.setStyleSheet("QLabel { color: red; font-weight: bold; font-size: 14px; }")
-            self.log_message("✗ Boot sequence failed. Please check connections and try again.", "ERROR")
+            self.log_message("Boot sequence failed. Please check connections.", "ERROR")
             self.btStart.setEnabled(True)
 
     def clickStop(self):
         """Stop the running processes and close the application"""
-        self.log_message("=" * 60, "WARNING")
-        self.log_message("STOP BUTTON PRESSED - SHUTTING DOWN", "WARNING")
-        self.log_message("=" * 60, "WARNING")
+        self.log_message("Stop button pressed. Shutting down...", "WARNING")
         self.mesaApp.running = False
         
         # Wait a bit for the thread to finish
@@ -276,23 +270,21 @@ class MainWindow(QWidget):
         # Determine log level and color based on status
         if "Failed" in status or "Error" in status:
             self.statusLabel.setStyleSheet("QLabel { color: red; font-weight: bold; font-size: 14px; }")
-            # Don't duplicate error logs - they're already logged by error_occurred
+            self.log_message(display_message, "ERROR")
+            # Re-enable start button on failure
+            self.btStart.setEnabled(True)
         elif "Running" in status or "Waiting" in status:
             self.statusLabel.setStyleSheet("QLabel { color: orange; font-weight: bold; font-size: 14px; }")
-            # Status updates are for UI only, detailed logs come from log_message
+            self.log_message(display_message, "INFO")
         elif "Completed" in status or "Success" in status:
             self.statusLabel.setStyleSheet("QLabel { color: green; font-weight: bold; font-size: 14px; }")
+            self.log_message(display_message, "SUCCESS")
             # Re-enable start button on completion
             self.btStart.setEnabled(True)
         else:
             self.statusLabel.setStyleSheet("QLabel { color: blue; font-weight: bold; font-size: 14px; }")
+            self.log_message(display_message, "INFO")
 
-# Import after class definition to check OpenCV
-try:
-    import cv2
-    OPENCV_AVAILABLE = True
-except ImportError:
-    OPENCV_AVAILABLE = False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
