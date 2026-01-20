@@ -267,7 +267,7 @@ class mesa(QThread):
         time.sleep(2)
         
         # Click on EGAT 15kV button
-        if not self.find_and_click('./imgdata/bt_15kv.png', confidence=0.8, retries=3):
+        if not self.find_and_click('./imgdata/bt_15kv.png', confidence=0.95, retries=3):
             self.error_occurred.emit("EGAT 15kV Error", "Cannot start EGAT 15kV process. Button not found.")
             self.data_send.emit("MESA,ALM\n")
             return False
@@ -293,7 +293,7 @@ class mesa(QThread):
         time.sleep(2)
         
         # Click on EGAT 50kV button
-        if not self.find_and_click('./imgdata/bt_50kv.png', confidence=0.8, retries=3):
+        if not self.find_and_click('./imgdata/bt_50kv.png', confidence=0.95, retries=3):
             self.error_occurred.emit("EGAT 50kV Error", "Cannot start EGAT 50kV process. Button not found.")
             self.data_send.emit("MESA,ALM\n")
             return False
@@ -429,7 +429,7 @@ class mesa(QThread):
                     mesa_status = False
                     self.status_update.emit("Status: Failed")
                     self.log("MESA USB error - stopping thread", "INFO")
-                    self.data_send.emit("MESA,E0\n")
+                    self.data_send.emit("MESA,E03\n")
                     break
 
                 if mesa_status:

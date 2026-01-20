@@ -195,9 +195,9 @@ class MainWindow(QWidget):
         # Launch the MESA application
         try:
             self.log_message("Launching MESA application...", "INFO")
-            os.chdir(r"C:\Program Files (x86)\HORIBA\HORIBA X-RAY LAB For MESA-50 SERIES")
+            # os.chdir(r"C:\Program Files (x86)\HORIBA\HORIBA X-RAY LAB For MESA-50 SERIES")
             subprocess.Popen("MesaApplication.exe")
-            os.chdir(r"D:\horiba-automation")
+            # os.chdir(r"D:\horiba-automation")
             self.log_message("MESA application launched successfully", "SUCCESS")
         except Exception as e:
             self.log_message(f"Failed to launch MESA application: {str(e)}", "ERROR")
