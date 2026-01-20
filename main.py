@@ -159,6 +159,18 @@ class MainWindow(QWidget):
         # Append to log
         self.logTextEdit.append(formatted_message)
         
+        # Auto-trim log to prevent memory overflow for 24/7 operation
+        # Keep only last 1000 lines (approximately 100KB)
+        document = self.logTextEdit.document()
+        if document.blockCount() > 1000:
+            cursor = QTextCursor(document)
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            # Remove first 200 lines when limit is reached
+            for _ in range(200):
+                cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+                cursor.removeSelectedText()
+                cursor.deleteChar()  # Delete the newline
+        
         # Auto-scroll to bottom
         scrollbar = self.logTextEdit.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
